@@ -203,7 +203,16 @@ VERDICT THRESHOLDS:
 - BORDERLINE: overall 7.0 - 8.4
 - NOT_WORTH: overall < 7.0
 
-For VALUES: Estimate current market values based on your knowledge. Use "$X" format.
+For VALUES: You MUST base your values on ACTUAL eBay sold/completed listing prices. Think about what this specific card has RECENTLY sold for on eBay in each grade. Consider:
+- The exact card (year, set, variation, card number, player)
+- Recent eBay sold listings (completed sales, not active listings)
+- Raw/ungraded sold prices for the "raw" value
+- PSA graded sold prices for each grade level
+- If it is a rookie card, parallel, auto, numbered, or special insert, price accordingly
+- Use realistic market values - do not inflate or deflate
+- For common base cards, raw value may be $0.50-$5. For stars and rookies it varies widely
+- Format as "$X.XX" for values under $100, "$X" for values over $100
+- If you truly cannot identify the card, use "N/A" for all values
 
 IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
   }
