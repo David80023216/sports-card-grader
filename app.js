@@ -183,11 +183,11 @@ Analyze this card and provide a JSON response with this EXACT structure:
   "verdict": "WORTH_GRADING" | "BORDERLINE" | "NOT_WORTH",
   "notes": "Brief explanation of grades and recommendation",
   "values": {
-    "raw": "$X",
-    "psa7": "$X",
-    "psa8": "$X",
-    "psa9": "$X",
-    "psa10": "$X"
+    "raw": "$X.XX",
+    "psa7": "$X.XX",
+    "psa8": "$X.XX",
+    "psa9": "$X.XX",
+    "psa10": "$X.XX"
   }
 }
 
