@@ -203,15 +203,15 @@ VERDICT THRESHOLDS:
 - BORDERLINE: overall 7.0 - 8.4
 - NOT_WORTH: overall < 7.0
 
-For VALUES: You MUST base your values on ACTUAL eBay sold/completed listing prices. Think about what this specific card has RECENTLY sold for on eBay in each grade. Consider:
-- The exact card (year, set, variation, card number, player)
-- Recent eBay sold listings (completed sales, not active listings)
-- Raw/ungraded sold prices for the "raw" value
-- PSA graded sold prices for each grade level
+For VALUES: You MUST provide the EXACT last sold price from eBay completed/sold listings for this specific card in each grade. These must reflect the MOST RECENT actual sale, down to the exact penny.
+- Identify the exact card: year, set, variation, card number, player name
+- For each grade level (Raw, PSA 7, PSA 8, PSA 9, PSA 10), provide the last completed eBay sold price
+- Raw value = last sold price for an ungraded copy of this exact card
+- PSA 7/8/9/10 values = last sold price for this exact card in that PSA grade
+- ALL prices MUST be formatted to the penny as "$X.XX" (e.g. "$4.99", "$127.50", "$1,249.99")
+- NEVER round to whole dollars - always show cents (e.g. "$12.99" not "$13")
 - If it is a rookie card, parallel, auto, numbered, or special insert, price accordingly
-- Use realistic market values - do not inflate or deflate
-- For common base cards, raw value may be $0.50-$5. For stars and rookies it varies widely
-- Format as "$X.XX" for values under $100, "$X" for values over $100
+- Use ONLY real eBay sold data - do not estimate, guess, or round
 - If you truly cannot identify the card, use "N/A" for all values
 
 IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
