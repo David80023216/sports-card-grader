@@ -15,18 +15,15 @@
   const historySection = $("history-section");
 
   // ---- API Key ----
+  const BUILT_IN_KEY = "gen-lang-client-0194706602";
   function getApiKey() {
-    return localStorage.getItem("gemini_api_key") || "";
+    return BUILT_IN_KEY || localStorage.getItem("gemini_api_key") || "";
   }
 
   function initApiKey() {
-    const key = getApiKey();
-    if (key) {
-      $("apiKeyInput").value = "••••••••••••••••";
-      $("apiKeyStatus").textContent = "✅ API key saved. You're ready to scan!";
-      $("apiKeyStatus").style.color = "#22c55e";
-      uploadSection.style.display = "block";
-    }
+    // Key is built-in, auto-enable
+    apiKeySection.style.display = "none";
+    uploadSection.style.display = "block";
     $("saveApiKey").addEventListener("click", () => {
       const val = $("apiKeyInput").value.trim();
       if (!val || val.startsWith("••")) return;
