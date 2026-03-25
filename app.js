@@ -178,24 +178,7 @@ Return ONLY valid JSON.` },
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
       body: JSON.stringify({
         model: "compound-beta-mini",
-        messages: [{ role: "user", content: `Search eBay sold/completed listings for "${cardName}" and find the most recent sold prices. I need the last sold price (to the exact penny) for each of these conditions:
-
-1. Raw/Ungraded
-2. PSA 7
-3. PSA 8
-4. PSA 9
-5. PSA 10
-
-Search for each grade separately on eBay. Use the SOLD/COMPLETED listings only (not active listings).
-
-Return ONLY a JSON object in this exact format, no other text:
-{"raw":"$X.XX","psa7":"$X.XX","psa8":"$X.XX","psa9":"$X.XX","psa10":"$X.XX"}
-
-Rules:
-- Every price MUST have cents (e.g. "$4.99" not "$5")
-- Use actual sold prices from eBay, not asking prices
-- If no sold listing exists for a grade, use "N/A"
-- Do NOT round prices - use the exact sale amount` }],
+        messages: [{ role: "user", content: `Search eBay completed/sold listings for ${cardName}. Find the last sold price for: Raw, PSA 7, PSA 8, PSA 9, PSA 10. Reply with ONLY JSON: {"raw":"$X.XX","psa7":"$X.XX","psa8":"$X.XX","psa9":"$X.XX","psa10":"$X.XX"}` }],
         temperature: 0.1,
         max_tokens: 512
       })
