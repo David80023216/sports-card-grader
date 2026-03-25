@@ -1,4 +1,4 @@
-// Sports Card Grader — Groq Vision + Web Search for Real eBay Prices
+// Sports Card Grader v3 — Single-call grading + pricing
 (function () {
   "use strict";
 
@@ -20,8 +20,8 @@
   function initApiKey() {
     apiKeySection.style.display = "none";
     uploadSection.style.display = "block";
-    $("saveApiKey").addEventListener("click", () => {
-      const val = $("apiKeyInput").value.trim();
+    $("saveApiKey").addEventListener("click", function() {
+      var val = $("apiKeyInput").value.trim();
       if (!val || val.startsWith("••")) return;
       localStorage.setItem("groq_api_key", val);
       $("apiKeyInput").value = "••••••••••••••••";
@@ -33,13 +33,13 @@
   }
 
   function compressImage(file, maxDim, quality) {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement("canvas");
-          let w = img.width, h = img.height;
+    return new Promise(function(resolve) {
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var img = new Image();
+        img.onload = function() {
+          var canvas = document.createElement("canvas");
+          var w = img.width, h = img.height;
           if (w > maxDim || h > maxDim) {
             if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
             else { w = Math.round(w * maxDim / h); h = maxDim; }
@@ -55,319 +55,222 @@
     });
   }
 
-  function setupUpload(areaId, inputId, previewId, placeholderId, setter) {
-    const area = $(areaId);
-    const input = $(inputId);
-    const preview = $(previewId);
-    const placeholder = $(placeholderId);
-
-    area.addEventListener("click", () => input.click());
-    area.addEventListener("dragover", (e) => { e.preventDefault(); area.style.borderColor = "#3b82f6"; });
-    area.addEventListener("dragleave", () => { area.style.borderColor = ""; });
-    area.addEventListener("drop", (e) => {
-      e.preventDefault();
-      area.style.borderColor = "";
-      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  function setupImageUpload(inputId, previewId, labelId, which) {
+    var input = $(inputId);
+    var preview = $(previewId);
+    input.addEventListener("change", function(e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      compressImage(file, 800, 0.7).then(function(data) {
+        if (which === "front") frontImageData = data;
+        else backImageData = data;
+        preview.innerHTML = '<img src="data:image/jpeg;base64,' + data + '" alt="' + which + '">';
+        $(labelId).textContent = "✅ " + which.charAt(0).toUpperCase() + which.slice(1) + " captured";
+        checkReady();
+      });
     });
-    input.addEventListener("change", () => {
-      if (input.files.length) handleFile(input.files[0]);
-    });
+  }
 
-    async function handleFile(file) {
-      if (!file.type.startsWith("image/")) return;
-      const b64 = await compressImage(file, 1024, 0.8);
-      setter(b64);
-      preview.src = "data:image/jpeg;base64," + b64;
-      preview.style.display = "block";
-      placeholder.style.display = "none";
-      area.classList.add("has-image");
-      updateAnalyzeBtn();
+  function checkReady() {
+    $("analyzeBtn").disabled = !frontImageData;
+    if (frontImageData) {
+      $("analyzeBtn").style.opacity = "1";
     }
   }
 
-  function updateAnalyzeBtn() { $("analyzeBtn").disabled = !frontImageData; }
-
-  function clearUploads() {
-    frontImageData = null;
-    backImageData = null;
-    ["front", "back"].forEach((s) => {
-      $(`${s}Preview`).style.display = "none";
-      $(`${s}Placeholder`).style.display = "flex";
-      $(`${s}Upload`).classList.remove("has-image");
-      $(`${s}Input`).value = "";
-    });
-    updateAnalyzeBtn();
-    resultsSection.style.display = "none";
+  function setLoadingText(t) {
+    var el = $("loadingText");
+    if (el) el.textContent = t;
   }
 
-  function setLoadingText(text) {
-    const el = loadingSection.querySelector("p");
-    if (el) el.textContent = text;
+  function showSection(name) {
+    uploadSection.style.display = name === "upload" ? "block" : "none";
+    loadingSection.style.display = name === "loading" ? "block" : "none";
+    resultsSection.style.display = name === "results" ? "block" : "none";
   }
 
-  // Step 1: Vision model grades the card
-  async function gradeCard(apiKey) {
-    setLoadingText("Analyzing card condition...");
+  async function analyzeCard() {
+    showSection("loading");
+    setLoadingText("Analyzing card with AI...");
 
-    const backNote = backImageData
-      ? "I'm providing both the FRONT and BACK of the card. Analyze both sides."
-      : "I'm providing only the FRONT of the card.";
-
-    const content = [
-      { type: "text", text: `You are an expert sports card grader. ${backNote}
-
-Analyze this card and provide a JSON response:
-{
-  "cardName": "Full card name with year, manufacturer, set, card number, player, variations (e.g. '2023-24 Panini Mosaic #238 Victor Wembanyama RC')",
-  "cardDetails": "Brief description",
-  "centering": <1-10>,
-  "corners": <1-10>,
-  "edges": <1-10>,
-  "surface": <1-10>,
-  "overall": <weighted avg to 1 decimal>,
-  "verdict": "WORTH_GRADING" | "BORDERLINE" | "NOT_WORTH",
-  "notes": "Brief grading explanation"
-}
-
-GRADING: Default to HIGH scores (9-10) for clean cards. Phone photos add artifacts - do NOT penalize for photo quality.
-- Centering: Equal borders=10, slightly off=9, noticeably off=7-8, way off=5-6
-- Corners: Sharp=10, minor softness=9, visible rounding=7-8, dinged=5-6
-- Edges: Clean=10, tiny imperfections=9, whitening=7-8, rough=5-6
-- Surface: Clean/glossy=10, minor marks=9, scratches=7-8, creases=5-6
-
-VERDICT: WORTH_GRADING >= 8.5, BORDERLINE 7.0-8.4, NOT_WORTH < 7.0
-
-Be VERY specific with cardName - include year, set, card number, player, RC/parallel/auto/refractor if applicable. This will be used to search eBay.
-
-Return ONLY valid JSON.` },
-      { type: "image_url", image_url: { url: "data:image/jpeg;base64," + frontImageData } }
-    ];
+    var key = localStorage.getItem("groq_api_key") || getApiKey();
+    var images = [];
+    images.push({type: "image_url", image_url: {url: "data:image/jpeg;base64," + frontImageData}});
     if (backImageData) {
-      content.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + backImageData } });
+      images.push({type: "image_url", image_url: {url: "data:image/jpeg;base64," + backImageData}});
     }
 
-    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-      body: JSON.stringify({
-        model: "meta-llama/llama-4-scout-17b-16e-instruct",
-        messages: [{ role: "user", content }],
-        temperature: 0.3,
-        max_tokens: 1024,
-        response_format: { type: "json_object" }
-      })
-    });
-
-    if (!resp.ok) {
-      const err = await resp.json();
-      if (resp.status === 429) throw new Error("Rate limit - wait a minute and try again.");
-      if (resp.status === 401) throw new Error("Invalid API key.");
-      throw new Error(err.error?.message || "Grading failed");
-    }
-
-    const data = await resp.json();
-    return JSON.parse(data.choices[0].message.content);
-  }
-
-  // Step 2: Web search model gets real eBay prices
-  async function getEbayPrices(apiKey, cardName) {
-    setLoadingText("Searching eBay sold listings for real prices...");
-      
-      // Debug output visible on page
-      const debugDiv = document.createElement("div");
-      debugDiv.id = "price-debug";
-      debugDiv.style.cssText = "background:#222;color:#0f0;padding:10px;margin:10px 0;font-size:12px;border-radius:8px;white-space:pre-wrap;max-height:200px;overflow:auto;";
-      debugDiv.textContent = "DEBUG: Starting price lookup for: " + cardName;
-      document.querySelector(".results-section")?.appendChild(debugDiv);
-      const dbg = (msg) => { if(document.getElementById("price-debug")) document.getElementById("price-debug").textContent += "\n" + msg; };
+    var content = [{type: "text", text: "You are a professional sports card grader. Analyze this card image(s) and provide grading details.\n\nIMPORTANT: Your response must be ONLY valid JSON, no other text. Use this exact format:\n{\n  \"cardName\": \"Year Brand Player Details\",\n  \"centering\": {\"score\": 8.5, \"notes\": \"brief note\"},\n  \"corners\": {\"score\": 9.0, \"notes\": \"brief note\"},\n  \"edges\": {\"score\": 9.0, \"notes\": \"brief note\"},\n  \"surface\": {\"score\": 8.5, \"notes\": \"brief note\"},\n  \"overall\": 8.5,\n  \"notes\": \"Overall assessment\",\n  \"values\": {\n    \"raw\": \"$1.25\",\n    \"psa7\": \"$3.50\",\n    \"psa8\": \"$5.99\",\n    \"psa9\": \"$12.50\",\n    \"psa10\": \"$45.00\"\n  }\n}\n\nGRADING RULES:\n- Account for photo quality artifacts (lighting, angle, phone camera) - do NOT penalize the card for photo issues\n- Grade the CARD not the PHOTO\n- Be fair but not overly conservative\n- A card that looks clean with good corners is likely an 8.5-9.5\n\nPRICING RULES:\n- values must be realistic prices based on what this exact card sells for on eBay\n- Include dollar sign and cents (e.g. $4.99 not $5)\n- Common base cards raw: $0.50-$3.00\n- Star player base cards raw: $1.00-$10.00\n- Rookies, parallels, autos worth more\n- Each PSA grade should be progressively higher than raw\n- If you cannot identify the card, give reasonable estimates for the card type you see"}];
+    images.forEach(function(img) { content.push(img); });
 
     try {
-      const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      var resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + key
+        },
         body: JSON.stringify({
-          model: "compound-beta-mini",
-          messages: [{ role: "user", content: "Search eBay completed/sold listings for " + cardName + ". Find the last sold price for: Raw, PSA 7, PSA 8, PSA 9, PSA 10. Reply ONLY with JSON like: {\"raw\":\"$1.99\",\"psa7\":\"$2.99\",\"psa8\":\"$4.99\",\"psa9\":\"$9.99\",\"psa10\":\"$19.99\"}" }],
-          temperature: 0.1,
-          max_tokens: 512
+          model: "meta-llama/llama-4-scout-17b-16e-instruct",
+          messages: [{role: "user", content: content}],
+          temperature: 0.3,
+          max_tokens: 1000
         })
       });
 
       if (!resp.ok) {
-        const errText = await resp.text();
-        console.error("Price API error:", resp.status, errText);
-        dbg("ERROR: HTTP " + resp.status + " - " + errText.substring(0,300));
-        setLoadingText("Price lookup failed (HTTP " + resp.status + ") - using estimates...");
-        return null;
+        var errText = await resp.text();
+        throw new Error("API error " + resp.status + ": " + errText.substring(0, 200));
       }
 
-      const data = await resp.json();
-      const text = data.choices[0].message.content;
-      console.log("Price API raw response:", text);
-      dbg("RESPONSE: " + text.substring(0,500));
-      
-      // Try parsing the full response as JSON first
-      try { return JSON.parse(text); } catch(e) {}
-      
-      // Extract JSON object from response text
-      const jsonMatch = text.match(/\{[\s\S]*?\}/);
-      if (jsonMatch) {
-        try { return JSON.parse(jsonMatch[0]); } catch(e) {}
+      var data = await resp.json();
+      var raw = data.choices[0].message.content;
+      console.log("RAW RESPONSE:", raw);
+
+      // Extract JSON from response
+      var jsonStr = raw;
+      // Try to find JSON block
+      var jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (jsonMatch) jsonStr = jsonMatch[0];
+
+      var result;
+      try {
+        result = JSON.parse(jsonStr);
+      } catch(e) {
+        // Try cleaning markdown code fences
+        jsonStr = jsonStr.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+        jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+        if (jsonMatch) jsonStr = jsonMatch[0];
+        result = JSON.parse(jsonStr);
       }
-      
-      // Try to extract individual prices with regex
-      const extract = (key) => {
-        const m = text.match(new RegExp('"' + key + '"\\s*:\\s*"(\\$[\\d,.]+)"'));
-        return m ? m[1] : "N/A";
-      };
-      return { raw: extract("raw"), psa7: extract("psa7"), psa8: extract("psa8"), psa9: extract("psa9"), psa10: extract("psa10") };
-    } catch (e) {
-      console.error("Price lookup exception:", e);
-      dbg("EXCEPTION: " + e.message);
-      setLoadingText("Price lookup error - using estimates...");
-      return null;
-    }
-  }
 
-  async function analyzeCard() {
-    const apiKey = getApiKey();
-    if (!apiKey) { alert("Please set your Groq API key first."); return; }
+      displayResults(result);
+      saveToHistory(result);
 
-    uploadSection.style.display = "none";
-    loadingSection.style.display = "block";
-    resultsSection.style.display = "none";
-
-    try {
-      // Step 1: Grade the card with vision
-      const result = gradeCard(apiKey);
-      const grading = await result;
-      
-      // Step 2: Look up real eBay prices with web search
-      let values = { raw: "N/A", psa7: "N/A", psa8: "N/A", psa9: "N/A", psa10: "N/A" };
-      if (grading.cardName && grading.cardName !== "Unknown Card") {
-        const ebayPrices = await getEbayPrices(apiKey, grading.cardName);
-        if (ebayPrices) {
-          values = {
-            raw: ebayPrices.raw || "N/A",
-            psa7: ebayPrices.psa7 || "N/A",
-            psa8: ebayPrices.psa8 || "N/A",
-            psa9: ebayPrices.psa9 || "N/A",
-            psa10: ebayPrices.psa10 || "N/A"
-          };
-        }
-      }
-      grading.values = values;
-
-      // Add eBay search link
-      grading.ebayUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(grading.cardName)}&LH_Sold=1&LH_Complete=1`;
-
-      displayResults(grading);
-      saveToHistory(grading);
     } catch (err) {
-      alert("Analysis failed: " + err.message);
-      uploadSection.style.display = "block";
-    } finally {
-      loadingSection.style.display = "none";
+      console.error("Analysis error:", err);
+      showSection("upload");
+      alert("Error: " + err.message);
     }
   }
 
-  function displayResults(result) {
-    $("cardName").textContent = result.cardName || "Unknown Card";
-    $("cardDetails").textContent = result.cardDetails || "";
+  function displayResults(r) {
+    showSection("results");
 
-    $("centeringScore").textContent = result.centering + "/10";
-    $("cornersScore").textContent = result.corners + "/10";
-    $("edgesScore").textContent = result.edges + "/10";
-    $("surfaceScore").textContent = result.surface + "/10";
-    $("overallScore").textContent = result.overall + "/10";
+    var overall = r.overall || 0;
+    var color = overall >= 9 ? "#22c55e" : overall >= 8 ? "#eab308" : overall >= 7 ? "#f97316" : "#ef4444";
+    var verdict = overall >= 8.5 ? "✅ Worth Grading!" : overall >= 7 ? "⚠️ Borderline" : "❌ Not Worth Grading";
 
-    const score = result.overall;
-    const scoreEl = $("overallScore");
-    if (score >= 8.5) scoreEl.style.color = "#22c55e";
-    else if (score >= 7) scoreEl.style.color = "#f59e0b";
-    else scoreEl.style.color = "#ef4444";
+    var vals = r.values || {};
+    var rawVal = vals.raw || "N/A";
+    var psa7 = vals.psa7 || "N/A";
+    var psa8 = vals.psa8 || "N/A";
+    var psa9 = vals.psa9 || "N/A";
+    var psa10 = vals.psa10 || "N/A";
 
-    const badge = $("verdictBadge");
-    if (result.verdict === "WORTH_GRADING") {
-      badge.textContent = "✅ Worth Grading!";
-      badge.className = "verdict-badge worth";
-    } else if (result.verdict === "BORDERLINE") {
-      badge.textContent = "⚠️ Borderline";
-      badge.className = "verdict-badge borderline";
-    } else {
-      badge.textContent = "❌ Not Worth It";
-      badge.className = "verdict-badge not-worth";
-    }
+    var cardName = r.cardName || "Unknown Card";
+    var ebaySearch = encodeURIComponent(cardName);
 
-    $("gradingNotes").textContent = result.notes || "";
+    resultsSection.innerHTML = '<h2 style="text-align:center;margin-bottom:20px;">📊 Analysis Results</h2>' +
+      '<div style="text-align:center;margin-bottom:5px;font-size:1.1em;color:#94a3b8;">' + cardName + '</div>' +
+      '<div style="text-align:center;margin-bottom:20px;font-size:1.3em;font-weight:bold;">' + verdict + '</div>' +
 
-    const values = result.values || {};
-    const rows = [
-      ["Raw (Ungraded)", values.raw || "N/A"],
-      ["PSA 7", values.psa7 || "N/A"],
-      ["PSA 8", values.psa8 || "N/A"],
-      ["PSA 9", values.psa9 || "N/A"],
-      ["PSA 10", values.psa10 || "N/A"]
-    ];
+      '<div class="card-section">' +
+      '<h3>📋 Grade Breakdown</h3>' +
+      gradeRow("Centering", r.centering) +
+      gradeRow("Corners", r.corners) +
+      gradeRow("Edges", r.edges) +
+      gradeRow("Surface", r.surface) +
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding:15px 0;border-top:2px solid ' + color + ';">' +
+      '<span style="font-size:1.2em;font-weight:bold;">Overall</span>' +
+      '<span style="font-size:2em;font-weight:bold;color:' + color + ';">' + overall + '/10</span>' +
+      '</div>' +
+      '<p style="color:#94a3b8;font-size:0.9em;">' + (r.notes || "") + '</p>' +
+      '</div>' +
 
-    const tbody = $("valuesBody");
-    tbody.innerHTML = "";
-    rows.forEach(([label, value], i) => {
-      const tr = document.createElement("tr");
-      if (i === rows.length - 1) tr.classList.add("highlight");
-      tr.innerHTML = `<td>${label}</td><td>${value}</td>`;
-      tbody.appendChild(tr);
-    });
+      '<div class="card-section">' +
+      '<h3>💰 Estimated Market Values</h3>' +
+      '<table style="width:100%;border-collapse:collapse;">' +
+      '<tr style="color:#94a3b8;font-size:0.85em;"><th style="text-align:left;padding:8px 0;">CONDITION</th><th style="text-align:right;padding:8px 0;">ESTIMATED VALUE</th></tr>' +
+      priceRow("Raw (Ungraded)", rawVal, false) +
+      priceRow("PSA 7", psa7, false) +
+      priceRow("PSA 8", psa8, false) +
+      priceRow("PSA 9", psa9, false) +
+      priceRow("PSA 10", psa10, true) +
+      '</table>' +
+      '<p style="color:#94a3b8;font-size:0.8em;margin-top:12px;">Values are estimates based on recent market data. Actual prices may vary.</p>' +
+      '<a href="https://www.ebay.com/sch/i.html?_nkw=' + ebaySearch + '&LH_Complete=1&LH_Sold=1&_sop=13" target="_blank" style="display:block;text-align:center;margin-top:10px;color:#60a5fa;text-decoration:none;">🔍 View eBay sold listings for this card<br><small style="color:#94a3b8;">Prices from real eBay completed sales</small></a>' +
+      '</div>' +
 
-    // eBay link
-    const existing = document.getElementById("ebayLink");
-    if (existing) existing.remove();
-    if (result.ebayUrl) {
-      const div = document.createElement("div");
-      div.id = "ebayLink";
-      div.style.cssText = "text-align:center;margin-top:12px;";
-      div.innerHTML = `<a href="${result.ebayUrl}" target="_blank" style="color:#3b82f6;text-decoration:underline;font-size:14px;">🔍 View eBay sold listings for this card</a><br><small style="color:#94a3b8;">Prices from real eBay completed sales</small>`;
-      tbody.closest("table").parentElement.appendChild(div);
-    }
-
-    resultsSection.style.display = "block";
-    uploadSection.style.display = "block";
-    resultsSection.scrollIntoView({ behavior: "smooth" });
+      '<button onclick="location.reload()" style="width:100%;padding:16px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:white;border:none;border-radius:12px;font-size:1.1em;font-weight:bold;cursor:pointer;margin-top:20px;">Scan Another Card</button>';
   }
 
-  function getHistory() {
-    try { return JSON.parse(localStorage.getItem("card_history") || "[]"); } catch { return []; }
+  function gradeRow(label, data) {
+    if (!data) return "";
+    var s = data.score || 0;
+    var c = s >= 9 ? "#22c55e" : s >= 8 ? "#eab308" : s >= 7 ? "#f97316" : "#ef4444";
+    var pct = (s / 10) * 100;
+    return '<div style="margin:12px 0;">' +
+      '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">' +
+      '<span>' + label + '</span><span style="color:' + c + ';font-weight:bold;">' + s + '/10</span></div>' +
+      '<div style="background:#1e293b;border-radius:4px;height:6px;overflow:hidden;">' +
+      '<div style="width:' + pct + '%;height:100%;background:' + c + ';border-radius:4px;"></div></div>' +
+      '<div style="color:#94a3b8;font-size:0.8em;margin-top:2px;">' + (data.notes || "") + '</div></div>';
+  }
+
+  function priceRow(label, value, highlight) {
+    var bg = highlight ? "background:rgba(59,130,246,0.1);" : "";
+    var border = "border-top:1px solid #334155;";
+    return '<tr style="' + bg + '">' +
+      '<td style="padding:12px 0;' + border + '">' + label + '</td>' +
+      '<td style="padding:12px 0;text-align:right;font-weight:bold;' + border + '">' + value + '</td></tr>';
   }
 
   function saveToHistory(result) {
-    const h = getHistory();
-    h.unshift({ name: result.cardName, overall: result.overall, verdict: result.verdict, date: new Date().toLocaleDateString() });
-    if (h.length > 50) h.length = 50;
-    localStorage.setItem("card_history", JSON.stringify(h));
-    renderHistory();
+    try {
+      var history = JSON.parse(localStorage.getItem("card_history") || "[]");
+      history.unshift({
+        date: new Date().toISOString(),
+        cardName: result.cardName || "Unknown",
+        overall: result.overall,
+        result: result
+      });
+      if (history.length > 20) history = history.slice(0, 20);
+      localStorage.setItem("card_history", JSON.stringify(history));
+    } catch(e) { console.error("Save error:", e); }
   }
 
-  function renderHistory() {
-    const h = getHistory();
-    if (!h.length) { historySection.style.display = "none"; return; }
-    historySection.style.display = "block";
-    $("historyList").innerHTML = h.map(i => `
-      <div class="history-item">
-        <div><div class="name">${i.name}</div><div class="date">${i.date}</div></div>
-        <div class="score">${i.overall}/10</div>
-      </div>`).join("");
+  function loadHistory() {
+    try {
+      var history = JSON.parse(localStorage.getItem("card_history") || "[]");
+      if (history.length === 0) {
+        historySection.style.display = "none";
+        return;
+      }
+      historySection.style.display = "block";
+      var html = "<h3>📜 Recent Scans</h3>";
+      history.forEach(function(item) {
+        var d = new Date(item.date).toLocaleDateString();
+        var color = item.overall >= 9 ? "#22c55e" : item.overall >= 8 ? "#eab308" : "#f97316";
+        html += '<div style="background:#1e293b;padding:12px;border-radius:8px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick=\'document.dispatchEvent(new CustomEvent("showHistory", {detail: ' + JSON.stringify(JSON.stringify(item.result)) + '}))\'>' +
+          '<div><div style="font-weight:bold;">' + (item.cardName || "Unknown") + '</div><div style="color:#94a3b8;font-size:0.8em;">' + d + '</div></div>' +
+          '<span style="color:' + color + ';font-weight:bold;font-size:1.2em;">' + item.overall + '</span></div>';
+      });
+      historySection.innerHTML = html;
+    } catch(e) { console.error("History error:", e); }
   }
 
-  function init() {
-    initApiKey();
-    setupUpload("frontUpload", "frontInput", "frontPreview", "frontPlaceholder", (b64) => { frontImageData = b64; });
-    setupUpload("backUpload", "backInput", "backPreview", "backPlaceholder", (b64) => { backImageData = b64; });
-    $("analyzeBtn").addEventListener("click", analyzeCard);
-    $("clearBtn").addEventListener("click", clearUploads);
-    $("scanAnother").addEventListener("click", () => { clearUploads(); window.scrollTo({ top: 0, behavior: "smooth" }); });
-    $("clearHistory").addEventListener("click", () => { localStorage.removeItem("card_history"); renderHistory(); });
-    renderHistory();
-  }
+  // Init
+  initApiKey();
+  setupImageUpload("frontImage", "frontPreview", "frontLabel", "front");
+  setupImageUpload("backImage", "backPreview", "backLabel", "back");
+  $("analyzeBtn").addEventListener("click", analyzeCard);
+  loadHistory();
 
-  init();
+  document.addEventListener("showHistory", function(e) {
+    try {
+      var result = JSON.parse(e.detail);
+      displayResults(result);
+    } catch(err) { console.error(err); }
+  });
 })();
