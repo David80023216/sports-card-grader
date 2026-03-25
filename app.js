@@ -1,12 +1,10 @@
-// Sports Card Grader — Standalone with Google Gemini API
+// Sports Card Grader — Standalone with Groq API (Free)
 (function () {
   "use strict";
 
-  // ---- State ----
-  let frontImageData = null; // base64
+  let frontImageData = null;
   let backImageData = null;
 
-  // ---- Elements ----
   const $ = (id) => document.getElementById(id);
   const apiKeySection = $("api-key-section");
   const uploadSection = $("upload-section");
@@ -14,28 +12,28 @@
   const resultsSection = $("results-section");
   const historySection = $("history-section");
 
-  // ---- API Key ----
-  const BUILT_IN_KEY = "AIzaSyCiAHQ-gmFJFWgk72D923HCzKpYuxslzQo";
   function getApiKey() {
-    return BUILT_IN_KEY || localStorage.getItem("gemini_api_key") || "";
+    return localStorage.getItem("groq_api_key") || "";
   }
 
   function initApiKey() {
-    // Key is built-in, auto-enable
-    apiKeySection.style.display = "none";
-    uploadSection.style.display = "block";
+    const saved = getApiKey();
+    if (saved) {
+      apiKeySection.style.display = "none";
+      uploadSection.style.display = "block";
+    }
     $("saveApiKey").addEventListener("click", () => {
       const val = $("apiKeyInput").value.trim();
       if (!val || val.startsWith("••")) return;
-      localStorage.setItem("gemini_api_key", val);
+      localStorage.setItem("groq_api_key", val);
       $("apiKeyInput").value = "••••••••••••••••";
       $("apiKeyStatus").textContent = "✅ API key saved. You're ready to scan!";
       $("apiKeyStatus").style.color = "#22c55e";
+      apiKeySection.querySelector("ol").style.display = "none";
       uploadSection.style.display = "block";
     });
   }
 
-  // ---- Image Upload ----
   function compressImage(file, maxDim, quality) {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -52,7 +50,7 @@
           canvas.height = h;
           canvas.getContext("2d").drawImage(img, 0, 0, w, h);
           const dataUrl = canvas.toDataURL("image/jpeg", quality);
-          resolve(dataUrl.split(",")[1]); // base64 only
+          resolve(dataUrl.split(",")[1]);
         };
         img.src = e.target.result;
       };
@@ -67,7 +65,6 @@
     const placeholder = $(placeholderId);
 
     area.addEventListener("click", () => input.click());
-
     area.addEventListener("dragover", (e) => { e.preventDefault(); area.style.borderColor = "#3b82f6"; });
     area.addEventListener("dragleave", () => { area.style.borderColor = ""; });
     area.addEventListener("drop", (e) => {
@@ -75,7 +72,6 @@
       area.style.borderColor = "";
       if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
     });
-
     input.addEventListener("change", () => {
       if (input.files.length) handleFile(input.files[0]);
     });
@@ -109,58 +105,61 @@
     resultsSection.style.display = "none";
   }
 
-  // ---- Gemini API ----
+  // ---- Groq API ----
   async function analyzeCard() {
     const apiKey = getApiKey();
-    if (!apiKey) { alert("Please set your Gemini API key first."); return; }
+    if (!apiKey) { alert("Please set your Groq API key first."); return; }
 
     uploadSection.style.display = "none";
     loadingSection.style.display = "block";
     resultsSection.style.display = "none";
 
     const prompt = buildPrompt();
-    const imageParts = [
-      { inlineData: { mimeType: "image/jpeg", data: frontImageData } }
+    
+    const content = [
+      { type: "text", text: prompt },
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64," + frontImageData } }
     ];
     if (backImageData) {
-      imageParts.push({ inlineData: { mimeType: "image/jpeg", data: backImageData } });
+      content.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + backImageData } });
     }
 
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: prompt },
-                ...imageParts
-              ]
-            }],
-            generationConfig: {
-              temperature: 0.3,
-              responseMimeType: "application/json"
-            }
-          })
-        }
-      );
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + apiKey
+        },
+        body: JSON.stringify({
+          model: "meta-llama/llama-4-scout-17b-16e-instruct",
+          messages: [{ role: "user", content: content }],
+          temperature: 0.3,
+          max_tokens: 2048,
+          response_format: { type: "json_object" }
+        })
+      });
 
       if (!response.ok) {
         const err = await response.json();
-        throw new Error(err.error?.message || "API request failed");
+        const msg = err.error?.message || "API request failed";
+        if (response.status === 429) {
+          throw new Error("Rate limit hit — wait a minute and try again. Groq free tier allows ~30 requests/minute.");
+        } else if (response.status === 401) {
+          throw new Error("Invalid API key. Please check your Groq key and try again.");
+        }
+        throw new Error(msg);
       }
 
       const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) throw new Error("No response from Gemini");
+      const text = data.choices?.[0]?.message?.content;
+      if (!text) throw new Error("No response from AI");
 
       const result = JSON.parse(text);
       displayResults(result);
       saveToHistory(result);
     } catch (err) {
-      if (err.message.includes("429") || err.message.includes("quota")) { alert("Rate limit hit — wait 30 seconds and try again!"); } else { alert("Analysis failed: " + err.message); }
+      alert("Analysis failed: " + err.message);
       uploadSection.style.display = "block";
     } finally {
       loadingSection.style.display = "none";
@@ -206,12 +205,11 @@ VERDICT THRESHOLDS:
 - BORDERLINE: overall 7.0 - 8.4
 - NOT_WORTH: overall < 7.0
 
-For VALUES: Estimate current market values based on your knowledge. If you're unsure, provide reasonable estimates. Use "$X" format.
+For VALUES: Estimate current market values based on your knowledge. Use "$X" format.
 
 IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
   }
 
-  // ---- Display Results ----
   function displayResults(result) {
     $("cardName").textContent = result.cardName || "Unknown Card";
     $("cardDetails").textContent = result.cardDetails || "";
@@ -222,14 +220,12 @@ IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
     $("surfaceScore").textContent = result.surface + "/10";
     $("overallScore").textContent = result.overall + "/10";
 
-    // Color the overall score
     const score = result.overall;
     const scoreEl = $("overallScore");
     if (score >= 8.5) scoreEl.style.color = "#22c55e";
     else if (score >= 7) scoreEl.style.color = "#f59e0b";
     else scoreEl.style.color = "#ef4444";
 
-    // Verdict
     const badge = $("verdictBadge");
     if (result.verdict === "WORTH_GRADING") {
       badge.textContent = "✅ Worth Grading!";
@@ -244,7 +240,6 @@ IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
 
     $("gradingNotes").textContent = result.notes || "";
 
-    // Values table
     const values = result.values || {};
     const rows = [
       ["Raw (Ungraded)", values.raw || "N/A"],
@@ -268,7 +263,6 @@ IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
     resultsSection.scrollIntoView({ behavior: "smooth" });
   }
 
-  // ---- History ----
   function getHistory() {
     try { return JSON.parse(localStorage.getItem("card_history") || "[]"); }
     catch { return []; }
@@ -306,7 +300,6 @@ IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
     `).join("");
   }
 
-  // ---- Init ----
   function init() {
     initApiKey();
     setupUpload("frontUpload", "frontInput", "frontPreview", "frontPlaceholder", (b64) => { frontImageData = b64; });
