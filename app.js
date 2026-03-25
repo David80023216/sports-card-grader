@@ -1,4 +1,4 @@
-// Sports Card Grader v3 — Single-call grading + pricing
+// Sports Card Grader v5 — Real eBay prices via Groq web search
 (function () {
   "use strict";
 
@@ -40,10 +40,7 @@
     var input = $(inputId);
     var preview = $(previewId);
     var placeholder = $(placeholderId);
-
-    // Click area to trigger file input
     area.addEventListener("click", function() { input.click(); });
-
     input.addEventListener("change", function(e) {
       var file = e.target.files[0];
       if (!file) return;
@@ -70,8 +67,72 @@
     $("results-section").style.display = name === "results" ? "block" : "none";
   }
 
+  function setLoadingText(text) {
+    var el = document.querySelector("#loading-section p");
+    if (el) el.textContent = text;
+  }
+
+  async function lookupEbayPrices(cardName, key) {
+    try {
+      var searchQuery = "eBay sold listing last sale price for " + cardName + " raw ungraded, PSA 7, PSA 8, PSA 9, PSA 10. Give exact prices with cents.";
+      var resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + key
+        },
+        body: JSON.stringify({
+          model: "compound-beta-mini",
+          messages: [{
+            role: "user",
+            content: searchQuery + "\n\nRespond ONLY with JSON: {\"raw\":\"$X.XX\",\"psa7\":\"$X.XX\",\"psa8\":\"$X.XX\",\"psa9\":\"$X.XX\",\"psa10\":\"$X.XX\"}"
+          }],
+          temperature: 0.3,
+          max_tokens: 300
+        })
+      });
+
+      if (!resp.ok) {
+        var errTxt = await resp.text();
+        console.error("Price API error:", resp.status, errTxt);
+        return null;
+      }
+
+      var data = await resp.json();
+      var raw = data.choices[0].message.content;
+      console.log("Price lookup raw response:", raw);
+
+      // Try to extract JSON
+      var jsonMatch = raw.match(/\{[^{}]*"raw"[^{}]*\}/);
+      if (!jsonMatch) jsonMatch = raw.match(/\{[\s\S]*?\}/);
+      if (jsonMatch) {
+        var prices = JSON.parse(jsonMatch[0]);
+        // Validate we got at least some prices
+        if (prices.raw || prices.psa9 || prices.psa10) {
+          return prices;
+        }
+      }
+
+      // Try parsing the whole response as JSON
+      try {
+        var cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+        var jm = cleaned.match(/\{[\s\S]*\}/);
+        if (jm) {
+          var prices2 = JSON.parse(jm[0]);
+          if (prices2.raw || prices2.psa9) return prices2;
+        }
+      } catch(e2) {}
+
+      return null;
+    } catch (err) {
+      console.error("Price lookup error:", err);
+      return null;
+    }
+  }
+
   async function analyzeCard() {
     showSection("loading");
+    setLoadingText("Step 1: Analyzing card condition...");
 
     var key = localStorage.getItem("groq_api_key") || getApiKey();
     var images = [];
@@ -80,20 +141,14 @@
       images.push({type: "image_url", image_url: {url: "data:image/jpeg;base64," + backImageData}});
     }
 
-    var prompt = "You are a professional sports card grader. Analyze this card image(s) and provide grading details.\n\n";
-    prompt += "IMPORTANT: Your response must be ONLY valid JSON, no other text. Use this exact format:\n";
-    prompt += '{"cardName":"Year Brand Player Details","centering":{"score":8.5,"notes":"brief note"},"corners":{"score":9.0,"notes":"brief note"},"edges":{"score":9.0,"notes":"brief note"},"surface":{"score":8.5,"notes":"brief note"},"overall":8.5,"notes":"Overall assessment","values":{"raw":"$1.25","psa7":"$3.50","psa8":"$5.99","psa9":"$12.50","psa10":"$45.00"}}\n\n';
-    prompt += "GRADING RULES:\n";
-    prompt += "- Account for photo quality artifacts (lighting, angle, phone camera) - do NOT penalize the card for photo issues\n";
-    prompt += "- Grade the CARD not the PHOTO\n";
-    prompt += "- Be fair but not overly conservative\n";
-    prompt += "- A card that looks clean with good corners is likely an 8.5-9.5\n\n";
-    prompt += "PRICING RULES:\n";
-    prompt += "- Values must be realistic prices based on what this exact card sells for on eBay\n";
-    prompt += "- Include dollar sign and cents (e.g. $4.99 not $5)\n";
-    prompt += "- Common base cards raw: $0.50-$3.00. Star player base: $1.00-$10.00\n";
-    prompt += "- Rookies, parallels, autos worth more. Each PSA grade should be progressively higher\n";
-    prompt += "- If you cannot identify the card, estimate for the card type you see";
+    var prompt = 'You are a professional sports card grader. Analyze this card and provide grading.\n\n';
+    prompt += 'RESPOND WITH ONLY VALID JSON:\n';
+    prompt += '{"cardName":"Year Brand Player Details","centering":{"score":8.5,"notes":"brief"},"corners":{"score":9.0,"notes":"brief"},"edges":{"score":9.0,"notes":"brief"},"surface":{"score":8.5,"notes":"brief"},"overall":8.5,"notes":"Assessment"}\n\n';
+    prompt += 'RULES:\n';
+    prompt += '- Grade the CARD not the PHOTO. Do not penalize for photo quality.\n';
+    prompt += '- Be fair, not overly conservative.\n';
+    prompt += '- A clean card with good corners is likely 8.5-9.5\n';
+    prompt += '- Identify the exact card: year, brand, set, player, card number if visible';
 
     var content = [{type: "text", text: prompt}];
     images.forEach(function(img) { content.push(img); });
@@ -109,7 +164,7 @@
           model: "meta-llama/llama-4-scout-17b-16e-instruct",
           messages: [{role: "user", content: content}],
           temperature: 0.3,
-          max_tokens: 1000
+          max_tokens: 800
         })
       });
 
@@ -120,8 +175,9 @@
 
       var data = await resp.json();
       var raw = data.choices[0].message.content;
+      console.log("Grading raw response:", raw);
 
-      // Extract JSON from response
+      // Extract JSON
       var jsonStr = raw;
       var jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (jsonMatch) jsonStr = jsonMatch[0];
@@ -134,6 +190,19 @@
         jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
         if (jsonMatch) jsonStr = jsonMatch[0];
         result = JSON.parse(jsonStr);
+      }
+
+      // Step 2: Look up real eBay prices
+      setLoadingText("Step 2: Looking up real eBay sold prices...");
+      var cardName = result.cardName || "Unknown Card";
+      var prices = await lookupEbayPrices(cardName, key);
+
+      if (prices) {
+        result.values = prices;
+        result.priceSource = "ebay";
+      } else {
+        result.values = {raw: "N/A", psa7: "N/A", psa8: "N/A", psa9: "N/A", psa10: "N/A"};
+        result.priceSource = "failed";
       }
 
       displayResults(result);
@@ -153,14 +222,12 @@
     var color = overall >= 9 ? "#22c55e" : overall >= 8 ? "#eab308" : overall >= 7 ? "#f97316" : "#ef4444";
     var verdict = overall >= 8.5 ? "✅ Worth Grading!" : overall >= 7 ? "⚠️ Borderline" : "❌ Not Worth Grading";
 
-    // Card name & verdict
     $("cardName").textContent = r.cardName || "Unknown Card";
     $("cardDetails").textContent = "";
     $("verdictBadge").textContent = verdict;
     $("verdictBadge").style.background = color + "22";
     $("verdictBadge").style.color = color;
 
-    // Grades
     setGrade("centeringScore", r.centering);
     setGrade("cornersScore", r.corners);
     setGrade("edgesScore", r.edges);
@@ -174,6 +241,16 @@
     var vals = r.values || {};
     var tbody = $("valuesBody");
     tbody.innerHTML = "";
+
+    // Price source indicator
+    var sourceRow = document.createElement("tr");
+    if (r.priceSource === "ebay") {
+      sourceRow.innerHTML = '<td colspan="2" style="text-align:center;color:#22c55e;font-size:0.85em;padding-bottom:8px;">📊 Prices from real eBay sold listings</td>';
+    } else {
+      sourceRow.innerHTML = '<td colspan="2" style="text-align:center;color:#f97316;font-size:0.85em;padding-bottom:8px;">⚠️ Could not fetch eBay prices - check link below</td>';
+    }
+    tbody.appendChild(sourceRow);
+
     var conditions = [
       ["Raw (Ungraded)", vals.raw],
       ["PSA 7", vals.psa7],
@@ -188,7 +265,7 @@
       tbody.appendChild(tr);
     });
 
-    // Add eBay link
+    // eBay link
     var ebaySearch = encodeURIComponent(r.cardName || "sports card");
     var linkRow = document.createElement("tr");
     linkRow.innerHTML = '<td colspan="2" style="text-align:center;padding-top:12px;"><a href="https://www.ebay.com/sch/i.html?_nkw=' + ebaySearch + '&LH_Complete=1&LH_Sold=1&_sop=13" target="_blank" style="color:#60a5fa;text-decoration:none;">🔍 View eBay sold listings</a></td>';
