@@ -172,6 +172,14 @@ Return ONLY valid JSON.` },
   // Step 2: Web search model gets real eBay prices
   async function getEbayPrices(apiKey, cardName) {
     setLoadingText("Searching eBay sold listings for real prices...");
+      
+      // Debug output visible on page
+      const debugDiv = document.createElement("div");
+      debugDiv.id = "price-debug";
+      debugDiv.style.cssText = "background:#222;color:#0f0;padding:10px;margin:10px 0;font-size:12px;border-radius:8px;white-space:pre-wrap;max-height:200px;overflow:auto;";
+      debugDiv.textContent = "DEBUG: Starting price lookup for: " + cardName;
+      document.querySelector(".results-section")?.appendChild(debugDiv);
+      const dbg = (msg) => { if(document.getElementById("price-debug")) document.getElementById("price-debug").textContent += "\n" + msg; };
 
     try {
       const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -188,6 +196,7 @@ Return ONLY valid JSON.` },
       if (!resp.ok) {
         const errText = await resp.text();
         console.error("Price API error:", resp.status, errText);
+        dbg("ERROR: HTTP " + resp.status + " - " + errText.substring(0,300));
         setLoadingText("Price lookup failed (HTTP " + resp.status + ") - using estimates...");
         return null;
       }
@@ -195,6 +204,7 @@ Return ONLY valid JSON.` },
       const data = await resp.json();
       const text = data.choices[0].message.content;
       console.log("Price API raw response:", text);
+      dbg("RESPONSE: " + text.substring(0,500));
       
       // Try parsing the full response as JSON first
       try { return JSON.parse(text); } catch(e) {}
@@ -213,6 +223,7 @@ Return ONLY valid JSON.` },
       return { raw: extract("raw"), psa7: extract("psa7"), psa8: extract("psa8"), psa9: extract("psa9"), psa10: extract("psa10") };
     } catch (e) {
       console.error("Price lookup exception:", e);
+      dbg("EXCEPTION: " + e.message);
       setLoadingText("Price lookup error - using estimates...");
       return null;
     }
