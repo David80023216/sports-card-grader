@@ -1,4 +1,4 @@
-// Sports Card Grader — Standalone with Groq API (Free)
+// Sports Card Grader — Groq Vision + Web Search for Real eBay Prices
 (function () {
   "use strict";
 
@@ -25,7 +25,7 @@
       if (!val || val.startsWith("••")) return;
       localStorage.setItem("groq_api_key", val);
       $("apiKeyInput").value = "••••••••••••••••";
-      $("apiKeyStatus").textContent = "✅ API key saved. You're ready to scan!";
+      $("apiKeyStatus").textContent = "✅ API key saved!";
       $("apiKeyStatus").style.color = "#22c55e";
       apiKeySection.querySelector("ol").style.display = "none";
       uploadSection.style.display = "block";
@@ -47,8 +47,7 @@
           canvas.width = w;
           canvas.height = h;
           canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL("image/jpeg", quality);
-          resolve(dataUrl.split(",")[1]);
+          resolve(canvas.toDataURL("image/jpeg", quality).split(",")[1]);
         };
         img.src = e.target.result;
       };
@@ -86,24 +85,141 @@
     }
   }
 
-  function updateAnalyzeBtn() {
-    $("analyzeBtn").disabled = !frontImageData;
-  }
+  function updateAnalyzeBtn() { $("analyzeBtn").disabled = !frontImageData; }
 
   function clearUploads() {
     frontImageData = null;
     backImageData = null;
-    ["front", "back"].forEach((side) => {
-      $(`${side}Preview`).style.display = "none";
-      $(`${side}Placeholder`).style.display = "flex";
-      $(`${side}Upload`).classList.remove("has-image");
-      $(`${side}Input`).value = "";
+    ["front", "back"].forEach((s) => {
+      $(`${s}Preview`).style.display = "none";
+      $(`${s}Placeholder`).style.display = "flex";
+      $(`${s}Upload`).classList.remove("has-image");
+      $(`${s}Input`).value = "";
     });
     updateAnalyzeBtn();
     resultsSection.style.display = "none";
   }
 
-  // ---- Groq API ----
+  function setLoadingText(text) {
+    const el = loadingSection.querySelector("p");
+    if (el) el.textContent = text;
+  }
+
+  // Step 1: Vision model grades the card
+  async function gradeCard(apiKey) {
+    setLoadingText("Analyzing card condition...");
+
+    const backNote = backImageData
+      ? "I'm providing both the FRONT and BACK of the card. Analyze both sides."
+      : "I'm providing only the FRONT of the card.";
+
+    const content = [
+      { type: "text", text: `You are an expert sports card grader. ${backNote}
+
+Analyze this card and provide a JSON response:
+{
+  "cardName": "Full card name with year, manufacturer, set, card number, player, variations (e.g. '2023-24 Panini Mosaic #238 Victor Wembanyama RC')",
+  "cardDetails": "Brief description",
+  "centering": <1-10>,
+  "corners": <1-10>,
+  "edges": <1-10>,
+  "surface": <1-10>,
+  "overall": <weighted avg to 1 decimal>,
+  "verdict": "WORTH_GRADING" | "BORDERLINE" | "NOT_WORTH",
+  "notes": "Brief grading explanation"
+}
+
+GRADING: Default to HIGH scores (9-10) for clean cards. Phone photos add artifacts - do NOT penalize for photo quality.
+- Centering: Equal borders=10, slightly off=9, noticeably off=7-8, way off=5-6
+- Corners: Sharp=10, minor softness=9, visible rounding=7-8, dinged=5-6
+- Edges: Clean=10, tiny imperfections=9, whitening=7-8, rough=5-6
+- Surface: Clean/glossy=10, minor marks=9, scratches=7-8, creases=5-6
+
+VERDICT: WORTH_GRADING >= 8.5, BORDERLINE 7.0-8.4, NOT_WORTH < 7.0
+
+Be VERY specific with cardName - include year, set, card number, player, RC/parallel/auto/refractor if applicable. This will be used to search eBay.
+
+Return ONLY valid JSON.` },
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64," + frontImageData } }
+    ];
+    if (backImageData) {
+      content.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + backImageData } });
+    }
+
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+      body: JSON.stringify({
+        model: "meta-llama/llama-4-scout-17b-16e-instruct",
+        messages: [{ role: "user", content }],
+        temperature: 0.3,
+        max_tokens: 1024,
+        response_format: { type: "json_object" }
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      if (resp.status === 429) throw new Error("Rate limit - wait a minute and try again.");
+      if (resp.status === 401) throw new Error("Invalid API key.");
+      throw new Error(err.error?.message || "Grading failed");
+    }
+
+    const data = await resp.json();
+    return JSON.parse(data.choices[0].message.content);
+  }
+
+  // Step 2: Web search model gets real eBay prices
+  async function getEbayPrices(apiKey, cardName) {
+    setLoadingText("Searching eBay sold listings for real prices...");
+
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+      body: JSON.stringify({
+        model: "compound-beta-mini",
+        messages: [{ role: "user", content: `Search eBay sold/completed listings for "${cardName}" and find the most recent sold prices. I need the last sold price (to the exact penny) for each of these conditions:
+
+1. Raw/Ungraded
+2. PSA 7
+3. PSA 8
+4. PSA 9
+5. PSA 10
+
+Search for each grade separately on eBay. Use the SOLD/COMPLETED listings only (not active listings).
+
+Return ONLY a JSON object in this exact format, no other text:
+{"raw":"$X.XX","psa7":"$X.XX","psa8":"$X.XX","psa9":"$X.XX","psa10":"$X.XX"}
+
+Rules:
+- Every price MUST have cents (e.g. "$4.99" not "$5")
+- Use actual sold prices from eBay, not asking prices
+- If no sold listing exists for a grade, use "N/A"
+- Do NOT round prices - use the exact sale amount` }],
+        temperature: 0.1,
+        max_tokens: 512
+      })
+    });
+
+    if (!resp.ok) {
+      console.log("Price lookup failed, using N/A");
+      return null;
+    }
+
+    const data = await resp.json();
+    const text = data.choices[0].message.content;
+    
+    // Extract JSON from response
+    try {
+      const jsonMatch = text.match(/\{[^}]+\}/);
+      if (jsonMatch) return JSON.parse(jsonMatch[0]);
+      return JSON.parse(text);
+    } catch (e) {
+      console.log("Failed to parse prices:", text);
+      return null;
+    }
+  }
+
   async function analyzeCard() {
     const apiKey = getApiKey();
     if (!apiKey) { alert("Please set your Groq API key first."); return; }
@@ -112,109 +228,38 @@
     loadingSection.style.display = "block";
     resultsSection.style.display = "none";
 
-    const prompt = buildPrompt();
-    
-    const content = [
-      { type: "text", text: prompt },
-      { type: "image_url", image_url: { url: "data:image/jpeg;base64," + frontImageData } }
-    ];
-    if (backImageData) {
-      content.push({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + backImageData } });
-    }
-
     try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + apiKey
-        },
-        body: JSON.stringify({
-          model: "meta-llama/llama-4-scout-17b-16e-instruct",
-          messages: [{ role: "user", content: content }],
-          temperature: 0.3,
-          max_tokens: 2048,
-          response_format: { type: "json_object" }
-        })
-      });
-
-      if (!response.ok) {
-        const err = await response.json();
-        const msg = err.error?.message || "API request failed";
-        if (response.status === 429) {
-          throw new Error("Rate limit hit — wait a minute and try again. Groq free tier allows ~30 requests/minute.");
-        } else if (response.status === 401) {
-          throw new Error("Invalid API key. Please check your Groq key and try again.");
+      // Step 1: Grade the card with vision
+      const result = gradeCard(apiKey);
+      const grading = await result;
+      
+      // Step 2: Look up real eBay prices with web search
+      let values = { raw: "N/A", psa7: "N/A", psa8: "N/A", psa9: "N/A", psa10: "N/A" };
+      if (grading.cardName && grading.cardName !== "Unknown Card") {
+        const ebayPrices = await getEbayPrices(apiKey, grading.cardName);
+        if (ebayPrices) {
+          values = {
+            raw: ebayPrices.raw || "N/A",
+            psa7: ebayPrices.psa7 || "N/A",
+            psa8: ebayPrices.psa8 || "N/A",
+            psa9: ebayPrices.psa9 || "N/A",
+            psa10: ebayPrices.psa10 || "N/A"
+          };
         }
-        throw new Error(msg);
       }
+      grading.values = values;
 
-      const data = await response.json();
-      const text = data.choices?.[0]?.message?.content;
-      if (!text) throw new Error("No response from AI");
+      // Add eBay search link
+      grading.ebayUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(grading.cardName)}&LH_Sold=1&LH_Complete=1`;
 
-      const result = JSON.parse(text);
-      displayResults(result);
-      saveToHistory(result);
+      displayResults(grading);
+      saveToHistory(grading);
     } catch (err) {
       alert("Analysis failed: " + err.message);
       uploadSection.style.display = "block";
     } finally {
       loadingSection.style.display = "none";
     }
-  }
-
-  function buildPrompt() {
-    const backNote = backImageData
-      ? "I'm providing both the FRONT and BACK of the card. Analyze both sides."
-      : "I'm providing only the FRONT of the card.";
-
-    return `You are an expert sports card grader. ${backNote}
-
-Analyze this card and provide a JSON response with this EXACT structure:
-{
-  "cardName": "Full card name (e.g., '2023-24 Panini Mosaic #238 Victor Wembanyama RC')",
-  "cardDetails": "Brief description (player, team, year, set, card number)",
-  "centering": <score 1-10>,
-  "corners": <score 1-10>,
-  "edges": <score 1-10>,
-  "surface": <score 1-10>,
-  "overall": <weighted average to 1 decimal>,
-  "verdict": "WORTH_GRADING" | "BORDERLINE" | "NOT_WORTH",
-  "notes": "Brief explanation of grades and recommendation",
-  "values": {
-    "raw": "$X.XX",
-    "psa7": "$X.XX",
-    "psa8": "$X.XX",
-    "psa9": "$X.XX",
-    "psa10": "$X.XX"
-  }
-}
-
-GRADING GUIDELINES:
-- Default to HIGH scores (9-10) for cards that look clean. Phone photos add compression artifacts, glare, and blur that make cards look worse than they are. Do NOT penalize for photo quality issues.
-- Centering: Check border alignment. Equal borders = 10. Slightly off = 9. Noticeably off = 7-8. Way off = 5-6.
-- Corners: Sharp and crisp = 10. Very minor softness = 9. Visible rounding = 7-8. Dinged = 5-6.
-- Edges: Clean and smooth = 10. Tiny imperfections = 9. Whitening/chipping = 7-8. Rough = 5-6.
-- Surface: Clean and glossy = 10. Minor marks = 9. Scratches/print defects = 7-8. Creases = 5-6.
-
-VERDICT THRESHOLDS:
-- WORTH_GRADING: overall >= 8.5
-- BORDERLINE: overall 7.0 - 8.4
-- NOT_WORTH: overall < 7.0
-
-For VALUES: You MUST provide the EXACT last sold price from eBay completed/sold listings for this specific card in each grade. These must reflect the MOST RECENT actual sale, down to the exact penny.
-- Identify the exact card: year, set, variation, card number, player name
-- For each grade level (Raw, PSA 7, PSA 8, PSA 9, PSA 10), provide the last completed eBay sold price
-- Raw value = last sold price for an ungraded copy of this exact card
-- PSA 7/8/9/10 values = last sold price for this exact card in that PSA grade
-- ALL prices MUST be formatted to the penny as "$X.XX" (e.g. "$4.99", "$127.50", "$1,249.99")
-- NEVER round to whole dollars - always show cents (e.g. "$12.99" not "$13")
-- If it is a rookie card, parallel, auto, numbered, or special insert, price accordingly
-- Use ONLY real eBay sold data - do not estimate, guess, or round
-- If you truly cannot identify the card, use "N/A" for all values
-
-IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
   }
 
   function displayResults(result) {
@@ -265,46 +310,43 @@ IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
       tbody.appendChild(tr);
     });
 
+    // eBay link
+    const existing = document.getElementById("ebayLink");
+    if (existing) existing.remove();
+    if (result.ebayUrl) {
+      const div = document.createElement("div");
+      div.id = "ebayLink";
+      div.style.cssText = "text-align:center;margin-top:12px;";
+      div.innerHTML = `<a href="${result.ebayUrl}" target="_blank" style="color:#3b82f6;text-decoration:underline;font-size:14px;">🔍 View eBay sold listings for this card</a><br><small style="color:#94a3b8;">Prices from real eBay completed sales</small>`;
+      tbody.closest("table").parentElement.appendChild(div);
+    }
+
     resultsSection.style.display = "block";
     uploadSection.style.display = "block";
     resultsSection.scrollIntoView({ behavior: "smooth" });
   }
 
   function getHistory() {
-    try { return JSON.parse(localStorage.getItem("card_history") || "[]"); }
-    catch { return []; }
+    try { return JSON.parse(localStorage.getItem("card_history") || "[]"); } catch { return []; }
   }
 
   function saveToHistory(result) {
-    const history = getHistory();
-    history.unshift({
-      name: result.cardName,
-      overall: result.overall,
-      verdict: result.verdict,
-      date: new Date().toLocaleDateString()
-    });
-    if (history.length > 50) history.length = 50;
-    localStorage.setItem("card_history", JSON.stringify(history));
+    const h = getHistory();
+    h.unshift({ name: result.cardName, overall: result.overall, verdict: result.verdict, date: new Date().toLocaleDateString() });
+    if (h.length > 50) h.length = 50;
+    localStorage.setItem("card_history", JSON.stringify(h));
     renderHistory();
   }
 
   function renderHistory() {
-    const history = getHistory();
-    if (!history.length) {
-      historySection.style.display = "none";
-      return;
-    }
+    const h = getHistory();
+    if (!h.length) { historySection.style.display = "none"; return; }
     historySection.style.display = "block";
-    const list = $("historyList");
-    list.innerHTML = history.map((h) => `
+    $("historyList").innerHTML = h.map(i => `
       <div class="history-item">
-        <div>
-          <div class="name">${h.name}</div>
-          <div class="date">${h.date}</div>
-        </div>
-        <div class="score">${h.overall}/10</div>
-      </div>
-    `).join("");
+        <div><div class="name">${i.name}</div><div class="date">${i.date}</div></div>
+        <div class="score">${i.overall}/10</div>
+      </div>`).join("");
   }
 
   function init() {
@@ -313,14 +355,8 @@ IMPORTANT: Return ONLY valid JSON, no markdown or extra text.`;
     setupUpload("backUpload", "backInput", "backPreview", "backPlaceholder", (b64) => { backImageData = b64; });
     $("analyzeBtn").addEventListener("click", analyzeCard);
     $("clearBtn").addEventListener("click", clearUploads);
-    $("scanAnother").addEventListener("click", () => {
-      clearUploads();
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    });
-    $("clearHistory").addEventListener("click", () => {
-      localStorage.removeItem("card_history");
-      renderHistory();
-    });
+    $("scanAnother").addEventListener("click", () => { clearUploads(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+    $("clearHistory").addEventListener("click", () => { localStorage.removeItem("card_history"); renderHistory(); });
     renderHistory();
   }
 
