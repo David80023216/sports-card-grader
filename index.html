@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sports Card Grader — Free AI Card Analysis</title>
+  <meta name="description" content="Free AI-powered sports card grading tool. Upload a photo of your card and get instant gradability analysis with market values.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🃏 Sports Card Grader</h1>
+      <p class="subtitle">Free AI-powered card analysis — powered by Google Gemini</p>
+    </header>
+
+    <!-- API Key Setup -->
+    <div id="api-key-section" class="card">
+      <h2>🔑 Setup (One Time)</h2>
+      <p>To use this tool, you need a <strong>free</strong> Google Gemini API key:</p>
+      <ol>
+        <li>Go to <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a></li>
+        <li>Sign in with your Google account</li>
+        <li>Click "Create API Key" — it's free!</li>
+        <li>Paste it below</li>
+      </ol>
+      <div class="api-key-input">
+        <input type="password" id="apiKeyInput" placeholder="Paste your Gemini API key here">
+        <button id="saveApiKey" class="btn btn-primary">Save Key</button>
+      </div>
+      <p class="hint" id="apiKeyStatus"></p>
+    </div>
+
+    <!-- Upload Section -->
+    <div id="upload-section" class="card" style="display:none;">
+      <h2>📸 Upload Your Card</h2>
+      <div class="upload-grid">
+        <div class="upload-area" id="frontUpload">
+          <div class="upload-placeholder" id="frontPlaceholder">
+            <span class="upload-icon">📸</span>
+            <span>Front of Card</span>
+            <span class="upload-hint">Click or drag to upload (required)</span>
+          </div>
+          <img id="frontPreview" class="preview-img" style="display:none;">
+          <input type="file" id="frontInput" accept="image/*" capture="environment" hidden>
+        </div>
+        <div class="upload-area" id="backUpload">
+          <div class="upload-placeholder" id="backPlaceholder">
+            <span class="upload-icon">🔄</span>
+            <span>Back of Card</span>
+            <span class="upload-hint">Click or drag to upload (optional)</span>
+          </div>
+          <img id="backPreview" class="preview-img" style="display:none;">
+          <input type="file" id="backInput" accept="image/*" capture="environment" hidden>
+        </div>
+      </div>
+      <div class="button-row">
+        <button id="analyzeBtn" class="btn btn-primary btn-large" disabled>Analyze Card</button>
+        <button id="clearBtn" class="btn btn-secondary">Clear</button>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading-section" class="card" style="display:none;">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Analyzing your card with AI...</p>
+        <p class="hint">Checking centering, corners, edges, surface & market values</p>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="results-section" style="display:none;">
+      <div class="card">
+        <h2 id="cardName">—</h2>
+        <p id="cardDetails" class="card-details"></p>
+        
+        <div class="verdict-badge" id="verdictBadge">—</div>
+
+        <div class="grades-grid">
+          <div class="grade-item">
+            <span class="grade-label">Centering</span>
+            <span class="grade-score" id="centeringScore">—</span>
+          </div>
+          <div class="grade-item">
+            <span class="grade-label">Corners</span>
+            <span class="grade-score" id="cornersScore">—</span>
+          </div>
+          <div class="grade-item">
+            <span class="grade-label">Edges</span>
+            <span class="grade-score" id="edgesScore">—</span>
+          </div>
+          <div class="grade-item">
+            <span class="grade-label">Surface</span>
+            <span class="grade-score" id="surfaceScore">—</span>
+          </div>
+        </div>
+
+        <div class="overall-score">
+          <span>Overall</span>
+          <span class="big-score" id="overallScore">—</span>
+        </div>
+
+        <p id="gradingNotes" class="grading-notes"></p>
+      </div>
+
+      <!-- Market Values -->
+      <div class="card">
+        <h2>💰 Estimated Market Values</h2>
+        <table class="values-table">
+          <thead>
+            <tr><th>Condition</th><th>Estimated Value</th></tr>
+          </thead>
+          <tbody id="valuesBody">
+          </tbody>
+        </table>
+        <p class="hint">Values are estimates based on recent market data. Actual prices may vary.</p>
+      </div>
+
+      <button id="scanAnother" class="btn btn-primary btn-large" style="width:100%;margin-top:1rem;">Scan Another Card</button>
+    </div>
+
+    <!-- History -->
+    <div id="history-section" class="card" style="display:none;">
+      <h2>📋 Scan History</h2>
+      <div id="historyList"></div>
+      <button id="clearHistory" class="btn btn-secondary" style="margin-top:0.5rem;">Clear History</button>
+    </div>
+
+    <footer>
+      <p>Built with ❤️ and Google Gemini AI • Card values are estimates only</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
