@@ -173,32 +173,47 @@ Return ONLY valid JSON.` },
   async function getEbayPrices(apiKey, cardName) {
     setLoadingText("Searching eBay sold listings for real prices...");
 
-    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
-      body: JSON.stringify({
-        model: "compound-beta-mini",
-        messages: [{ role: "user", content: `Search eBay completed/sold listings for ${cardName}. Find the last sold price for: Raw, PSA 7, PSA 8, PSA 9, PSA 10. Reply with ONLY JSON: {"raw":"$X.XX","psa7":"$X.XX","psa8":"$X.XX","psa9":"$X.XX","psa10":"$X.XX"}` }],
-        temperature: 0.1,
-        max_tokens: 512
-      })
-    });
-
-    if (!resp.ok) {
-      console.log("Price lookup failed, using N/A");
-      return null;
-    }
-
-    const data = await resp.json();
-    const text = data.choices[0].message.content;
-    
-    // Extract JSON from response
     try {
-      const jsonMatch = text.match(/\{[^}]+\}/);
-      if (jsonMatch) return JSON.parse(jsonMatch[0]);
-      return JSON.parse(text);
+      const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+        body: JSON.stringify({
+          model: "compound-beta-mini",
+          messages: [{ role: "user", content: "Search eBay completed/sold listings for " + cardName + ". Find the last sold price for: Raw, PSA 7, PSA 8, PSA 9, PSA 10. Reply ONLY with JSON like: {\"raw\":\"$1.99\",\"psa7\":\"$2.99\",\"psa8\":\"$4.99\",\"psa9\":\"$9.99\",\"psa10\":\"$19.99\"}" }],
+          temperature: 0.1,
+          max_tokens: 512
+        })
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.error("Price API error:", resp.status, errText);
+        setLoadingText("Price lookup failed (HTTP " + resp.status + ") - using estimates...");
+        return null;
+      }
+
+      const data = await resp.json();
+      const text = data.choices[0].message.content;
+      console.log("Price API raw response:", text);
+      
+      // Try parsing the full response as JSON first
+      try { return JSON.parse(text); } catch(e) {}
+      
+      // Extract JSON object from response text
+      const jsonMatch = text.match(/\{[\s\S]*?\}/);
+      if (jsonMatch) {
+        try { return JSON.parse(jsonMatch[0]); } catch(e) {}
+      }
+      
+      // Try to extract individual prices with regex
+      const extract = (key) => {
+        const m = text.match(new RegExp('"' + key + '"\\s*:\\s*"(\\$[\\d,.]+)"'));
+        return m ? m[1] : "N/A";
+      };
+      return { raw: extract("raw"), psa7: extract("psa7"), psa8: extract("psa8"), psa9: extract("psa9"), psa10: extract("psa10") };
     } catch (e) {
-      console.log("Failed to parse prices:", text);
+      console.error("Price lookup exception:", e);
+      setLoadingText("Price lookup error - using estimates...");
       return null;
     }
   }
