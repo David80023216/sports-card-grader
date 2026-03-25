@@ -15,7 +15,7 @@
   const historySection = $("history-section");
 
   // ---- API Key ----
-  const BUILT_IN_KEY = "gen-lang-client-0194706602";
+  const BUILT_IN_KEY = "AIzaSyCiAHQ-gmFJFWgk72D923HCzKpYuxslzQo";
   function getApiKey() {
     return BUILT_IN_KEY || localStorage.getItem("gemini_api_key") || "";
   }
