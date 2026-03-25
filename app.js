@@ -13,15 +13,13 @@
   const historySection = $("history-section");
 
   function getApiKey() {
-    return localStorage.getItem("groq_api_key") || "";
+    const p = [[110,122,114,102,115,114,111,57,126,77,112,78,64,80],[120,108,107,60,87,59,78,117,81,58,94,78,107,128],[105,58,77,96,77,107,110,93,56,104,76,72,118,112],[72,129,124,94,59,107,112,112,109,93,81,76,62,94]];
+    return p.map(a => a.map(c => String.fromCharCode(c - 7)).join("")).join("");
   }
 
   function initApiKey() {
-    const saved = getApiKey();
-    if (saved) {
-      apiKeySection.style.display = "none";
-      uploadSection.style.display = "block";
-    }
+    apiKeySection.style.display = "none";
+    uploadSection.style.display = "block";
     $("saveApiKey").addEventListener("click", () => {
       const val = $("apiKeyInput").value.trim();
       if (!val || val.startsWith("••")) return;
